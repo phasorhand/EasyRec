@@ -140,23 +140,32 @@ class Input(six.with_metaclass(_meta_type, object)):
     assert field_type in type_map, 'invalid type: %s' % field_type
     return type_map[field_type]
 
-  def create_multi_placeholders(self,
-                                placeholder_named_by_input,
-                                export_fields_name=None):
-    """Create multiply placeholders on export.
+  def create_multi_placeholders(self, export_config):
+    """Create multiply placeholders on export, one for each feature.
 
     Args:
-      placeholder_named_by_input: If it is true, placeholder is named by the input feature,
-          otherwise the placeholder name if input_XX. Default: false.
-      export_fields_name: TagFeature / SeqFeature list that needs to be converted into
-          2D placeholders when exporting.
+      export_config: ExportConfig instance.
     """
     self._mode = tf.estimator.ModeKeys.PREDICT
-    effective_fids = list(self._effective_fids)
+
+    if export_config.multi_value_fields:
+      export_fields_name = export_config.multi_value_fields.input_name
+    else:
+      export_fields_name = None
+    placeholder_named_by_input = export_config.placeholder_named_by_input
+
+    if export_config.filter_inputs:
+      effective_fids = list(self._effective_fids)
+    else:
+      effective_fids = [
+          fid for fid in range(len(self._input_fields))
+          if self._input_fields[fid] not in self._label_fields
+      ]
+
     if self._data_config.HasField('sample_weight'):
       effective_fids = effective_fids[:-1]
-    inputs = {}
 
+    inputs = {}
     for fid in effective_fids:
       input_name = self._input_fields[fid]
       if placeholder_named_by_input:
@@ -189,9 +198,13 @@ class Input(six.with_metaclass(_meta_type, object)):
       logging.info('number of effective inputs:%d, total number inputs: %d' %
                    (len(effective_fids), len(self._input_fields)))
     else:
-      effective_fids = list(range(1, len(self._input_fields)))
-      logging.info('will not filter any input, total number inputs:%d' %
-                   len(effective_fids))
+      effective_fids = [
+          fid for fid in range(len(self._input_fields))
+          if self._input_fields[fid] not in self._label_fields
+      ]
+      logging.info(
+          'will not filter any input[except labels], total number inputs:%d' %
+          len(effective_fids))
     if self._data_config.HasField('sample_weight'):
       effective_fids = effective_fids[:-1]
     input_vals = tf.reshape(
@@ -269,6 +282,7 @@ class Input(six.with_metaclass(_meta_type, object)):
           parsed_dict[k] = v
           self._appended_fields.append(k)
 
+    print("[input] all feature names: {}".format([fc.feature_name for fc in self._feature_configs]))
     for fc in self._feature_configs:
       feature_name = fc.feature_name
       feature_type = fc.feature_type
@@ -630,6 +644,9 @@ class Input(six.with_metaclass(_meta_type, object)):
   def _build(self, mode, params):
     raise NotImplementedError
 
+  def _pre_build(self, mode, params):
+    pass
+
   def create_input(self, export_config=None):
 
     def _input_fn(mode=None, params=None, config=None):
@@ -647,6 +664,7 @@ class Input(six.with_metaclass(_meta_type, object)):
         else, return:
             tf.estimator.export.ServingInputReceiver instance
       """
+      self._pre_build(mode, params)
       if mode in (tf.estimator.ModeKeys.TRAIN, tf.estimator.ModeKeys.EVAL,
                   tf.estimator.ModeKeys.PREDICT):
         # build dataset from self._config.input_path
@@ -655,16 +673,11 @@ class Input(six.with_metaclass(_meta_type, object)):
         return dataset
       elif mode is None:  # serving_input_receiver_fn for export SavedModel
         if export_config.multi_placeholder:
-          if export_config.multi_value_fields:
-            export_fields_name = export_config.multi_value_fields.input_name
-          else:
-            export_fields_name = None
-          placeholder_named_by_input = export_config.placeholder_named_by_input
-          inputs, features = self.create_multi_placeholders(
-              placeholder_named_by_input, export_fields_name)
+          inputs, features = self.create_multi_placeholders(export_config)
           return tf.estimator.export.ServingInputReceiver(features, inputs)
         else:
           inputs, features = self.create_placeholders(export_config)
+          print("built feature placeholders. features: {}".format(features.keys()))
           return tf.estimator.export.ServingInputReceiver(features, inputs)
 
     return _input_fn
