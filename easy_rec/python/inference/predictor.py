@@ -499,7 +499,6 @@ class Predictor(PredictorInterface):
 #        file_paths.extend(gfile.Glob(x))
 #      assert len(file_paths) > 0, 'match no files with %s' % input_path
 
-
       pipeline_config = config_util.get_configs_from_pipeline_file(pipeline_config)
       eval_data = self._get_input_object_by_name(pipeline_config,'eval')
       data_config = pipeline_config.data_config
