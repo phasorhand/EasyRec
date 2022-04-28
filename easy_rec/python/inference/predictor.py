@@ -22,6 +22,9 @@ from easy_rec.python.utils import pai_util
 from easy_rec.python.utils.config_util import get_configs_from_pipeline_file
 from easy_rec.python.utils.input_utils import get_type_defaults
 from easy_rec.python.utils.load_class import get_register_class_meta
+from easy_rec.python.input.input import Input
+from easy_rec.python.utils import config_util
+from easy_rec.python.utils import estimator_utils
 
 if tf.__version__ >= '2.0':
   tf = tf.compat.v1
@@ -159,6 +162,7 @@ class PredictorImpl(object):
     input_fields_list = [input_field.input_name for input_field in input_fields]
 
     return input_fields_info, input_fields_list
+
 
   def _build_model(self):
     """Load graph from model_path and create session for this graph."""
@@ -305,6 +309,10 @@ class PredictorImpl(object):
           return results
 
 
+def _get_input_fn(data_config, feature_configs, eval_data, param):
+  pass
+
+
 class Predictor(PredictorInterface):
 
   def __init__(self, model_path, profiling_file=None):
@@ -344,6 +352,65 @@ class Predictor(PredictorInterface):
     """
     return list(self._outputs_map.keys())
 
+  def _get_input_fn(data_config,
+                    feature_configs,
+                    data_path=None,
+                    export_config=None,
+                    check_mode=False,
+                    **kwargs):
+    """Build estimator input function.
+
+    Args:
+      data_config:  dataset config
+      feature_configs: FeatureConfig
+      data_path: input_data_path
+      export_config: configuration for exporting models,
+        only used to build input_fn when exporting models
+
+    Returns:
+      subclass of Input
+    """
+    #input_class_map = {y: x for x, y in data_config.InputType.items()}
+    #input_cls_name = input_class_map[data_config.input_type]
+    input_cls_name = 'HiveInput'
+    input_class = Input.create_class(input_cls_name)
+
+    task_id, task_num = estimator_utils.get_task_index_and_num()
+    input_obj = input_class(
+      data_config,
+      feature_configs,
+      data_path,
+      task_index=task_id,
+      task_num=task_num,
+      **kwargs)
+    input_fn = input_obj.create_input(export_config)
+    return input_fn
+
+  def _get_input_object_by_name(self,pipeline_config, worker_type):
+    """"
+      get object by worker type
+
+      pipeline_config: pipeline_config
+      worker_type: train or eval
+    """
+    input_type = "{}_path".format(worker_type)
+    input_name = pipeline_config.WhichOneof(input_type)
+    _dict = {"kafka_train_input": pipeline_config.kafka_train_input,
+             "kafka_eval_input": pipeline_config.kafka_eval_input,
+             "datahub_train_input": pipeline_config.datahub_train_input,
+             "datahub_eval_input": pipeline_config.datahub_eval_input,
+             "hive_train_input": pipeline_config.hive_train_input,
+             "hive_eval_input": pipeline_config.hive_eval_input
+             }
+    if input_name in _dict:
+      return _dict[input_name]
+
+    if worker_type == "train":
+      return pipeline_config.train_input_path
+    else:
+      return pipeline_config.eval_input_path
+
+
   def predict_impl(self,
                    input_table,
                    output_table,
@@ -351,6 +418,7 @@ class Predictor(PredictorInterface):
                    all_col_types='',
                    selected_cols='',
                    reserved_cols='',
+                   pipeline_config=None,
                    output_cols=None,
                    batch_size=1024,
                    slice_id=0,
@@ -397,10 +465,11 @@ class Predictor(PredictorInterface):
           slice_id=slice_id,
           slice_num=slice_num,
           input_sep=input_sep,
-          output_sep=output_sep)
+          output_sep=output_sep,
+          pipeline_config=pipeline_config)
 
   def predict_csv(self, input_path, output_path, reserved_cols, output_cols,
-                  batch_size, slice_id, slice_num, input_sep, output_sep):
+                  batch_size, slice_id, slice_num, input_sep, output_sep,pipeline_config,check_mode=False):
 
 
     record_defaults = [
@@ -425,12 +494,20 @@ class Predictor(PredictorInterface):
 
     with tf.Graph().as_default(), tf.Session() as sess:
       num_parallel_calls = 8
-      file_paths = []
-      for x in input_path.split(','):
-        file_paths.extend(gfile.Glob(x))
-      assert len(file_paths) > 0, 'match no files with %s' % input_path
+#      file_paths = []
+#      for x in input_path.split(','):
+#        file_paths.extend(gfile.Glob(x))
+#      assert len(file_paths) > 0, 'match no files with %s' % input_path
 
-      dataset = tf.data.Dataset.from_tensor_slices(file_paths)
+
+      pipeline_config = config_util.get_configs_from_pipeline_file(pipeline_config)
+      eval_data = self._get_input_object_by_name(pipeline_config,'eval')
+      data_config = pipeline_config.data_config
+      feature_configs = config_util.get_compatible_feature_configs(pipeline_config)
+      input_fn_kwargs = {}
+      dataset = self._get_input_fn(data_config, feature_configs, eval_data,**input_fn_kwargs)
+
+    #  dataset = tf.data.Dataset.from_tensor_slices(file_paths)
       parallel_num = min(num_parallel_calls, len(file_paths))
       dataset = dataset.interleave(
           tf.data.TextLineDataset,

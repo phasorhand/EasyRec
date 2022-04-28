@@ -34,7 +34,7 @@ tf.app.flags.DEFINE_string(
     'train_config.model_dir')
 tf.app.flags.DEFINE_string('model_dir', None, help='will update the model_dir')
 
-# predict by saved_model
+# predict by saved_model:
 tf.app.flags.DEFINE_string('saved_model_dir', None, help='save model dir')
 tf.app.flags.DEFINE_string(
     'reserved_cols', 'ALL_COLUMNS',

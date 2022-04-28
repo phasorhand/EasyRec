@@ -143,6 +143,7 @@ def _create_eval_export_spec(pipeline_config, eval_data, check_mode=False):
   if data_config.input_type == data_config.InputType.OdpsRTPInputV2:
     input_fn_kwargs['fg_json_path'] = pipeline_config.fg_json_path
   # create eval input
+
   export_input_fn = _get_input_fn(data_config, feature_configs, None,
                                   export_config, check_mode=check_mode,
                                   **input_fn_kwargs)
@@ -369,6 +370,7 @@ def evaluate(pipeline_config,
       pipeline_config.eval_input_path = eval_data_path
   train_config = pipeline_config.train_config
   eval_data = _get_input_object_by_name(pipeline_config, 'eval')
+
 
   server_target = None
   if 'TF_CONFIG' in os.environ:

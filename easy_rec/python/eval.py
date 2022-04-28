@@ -53,6 +53,7 @@ def main(argv):
     pipeline_config_path = FLAGS.pipeline_config_path
 
   if FLAGS.distribute_eval:
+
     eval_result = distribute_evaluate(pipeline_config_path, FLAGS.checkpoint_path,
                          FLAGS.eval_input_path)
   else:
